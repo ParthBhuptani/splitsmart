@@ -1,0 +1,6 @@
+{
+  "name": "SplitSmart",
+  "description": "AI-Powered Bill Splitting Web App. Split bills instantly with AI parsing. Modern, minimal, and dark-themed.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
