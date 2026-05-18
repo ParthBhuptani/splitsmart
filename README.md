@@ -30,7 +30,7 @@ Split bills with friends — equally, by item, or by percentage — in seconds.
 
 ## 🖥️ Demo
 
-> **Live App:** [your-vercel-link.vercel.app](https://your-vercel-link.vercel.app)
+> **Live App:** [splitsmart-expense.vercel.app](https://splitsmart-expense.vercel.app)
 
 ---
 
