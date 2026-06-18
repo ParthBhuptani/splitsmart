@@ -179,7 +179,6 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 ## 🙏 Acknowledgements
 
-- Part of [100+ React JS Projects](https://github.com/Vaibhav-kesarwani/100-reactjs-projects)
 - AI powered by [Google Gemini](https://ai.google.dev)
 - Icons by [Lucide](https://lucide.dev)
 
