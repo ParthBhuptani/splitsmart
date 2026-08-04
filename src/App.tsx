@@ -26,6 +26,7 @@ import confetti from 'canvas-confetti';
 import { BillItem, Person, SplitMode, Assignment, Settlement, Group, HistoryItem } from './types';
 import { parseBillWithAI } from './services/aiService';
 import { calculateSettlements } from './utils/algorithm';
+import { compressImage } from './utils/image';
 
 const PEOPLE_COLORS = [
   'bg-rose-500', 
@@ -50,6 +51,8 @@ export default function App() {
   const [percentages, setPercentages] = useState<Record<string, number>>({});
   const [payerId, setPayerId] = useState<string | null>(null);
   const [groupNotice, setGroupNotice] = useState<string | null>(null);
+  const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
   
   // Persistence State
   const [groups, setGroups] = useState<Group[]>([]);
@@ -110,26 +113,40 @@ export default function App() {
     setRawText('');
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const processImageFile = async (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      alert("That doesn't look like an image. Please upload a photo of your bill.");
+      return;
+    }
 
     setIsParsing(true);
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      const base64 = event.target?.result as string;
-      const data = base64.split(',')[1];
-      try {
-        const parsed = await parseBillWithAI('', data, file.type);
-        processParsedItems(parsed);
-      } catch (error) {
-        console.error(error);
-        alert("Failed to read image. Make sure the bill is clear and try again.");
-      } finally {
-        setIsParsing(false);
-      }
-    };
-    reader.readAsDataURL(file);
+    try {
+      // Downscale/compress on-device first — phone camera photos are often
+      // 3-12MB, which is both slow to upload on mobile data and can exceed
+      // the API's request size limit, causing "Failed to read image" errors.
+      const { data, mimeType } = await compressImage(file);
+      const parsed = await parseBillWithAI('', data, mimeType);
+      processParsedItems(parsed);
+    } catch (error: any) {
+      console.error(error);
+      alert(error?.message || "Failed to read image. Make sure the bill is clear and try again.");
+    } finally {
+      setIsParsing(false);
+    }
+  };
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-selecting the same file later
+    if (!file) return;
+    processImageFile(file);
+  };
+
+  const handleBillDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDraggingFile(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) processImageFile(file);
   };
 
   const addItemManually = () => {
@@ -216,15 +233,13 @@ export default function App() {
     setStep(1);
     setRawText('');
     setPayerId(null);
+    setActiveGroupId(null);
   };
 
   const handleSaveToHistory = (results: Settlement[]) => {
     const newItem: HistoryItem = {
       id: Math.random().toString(36).substr(2, 9),
-      groupId: people.length > 0 ? groups.find(g => 
-        g.people.length === people.length && 
-        g.people.every(p => people.some(pp => pp.name === p.name))
-      )?.id : undefined,
+      groupId: activeGroupId || undefined,
       date: new Date().toLocaleDateString(),
       total: totalAmount,
       peopleCount: people.length,
@@ -245,12 +260,14 @@ export default function App() {
       people: [...people]
     };
     setGroups([...groups, newGroup]);
+    setActiveGroupId(newGroup.id);
     alert("Group created! You can use it for future splits.");
   };
 
   const loadGroup = (group: Group) => {
     setPeople(group.people);
     setPayerId(group.people[0]?.id || null);
+    setActiveGroupId(group.id);
     setStep(1); // Go to step 1 so they can add the bill
     setActiveTab('split');
     setGroupNotice(`Group Loaded: ${group.name} (${group.people.length} people)`);
@@ -411,11 +428,24 @@ export default function App() {
               exit={{ opacity: 0, y: -20 }}
               className="flex-1 flex flex-col max-w-2xl mx-auto w-full gap-8"
             >
-              <div className="glass p-6 md:p-8 rounded-[2rem] space-y-4 shadow-2xl relative overflow-hidden">
+              <div
+                className={`glass p-6 md:p-8 rounded-[2rem] space-y-4 shadow-2xl relative overflow-hidden transition-all ${isDraggingFile ? 'ring-2 ring-emerald-500 bg-emerald-500/5' : ''}`}
+                onDragOver={(e) => { e.preventDefault(); setIsDraggingFile(true); }}
+                onDragLeave={(e) => { e.preventDefault(); setIsDraggingFile(false); }}
+                onDrop={handleBillDrop}
+              >
+                {isDraggingFile && (
+                  <div className="absolute inset-0 z-30 bg-slate-950/80 backdrop-blur-sm rounded-[2rem] border-2 border-dashed border-emerald-500 flex items-center justify-center pointer-events-none">
+                    <div className="flex flex-col items-center gap-2 text-emerald-500">
+                      <ImageIcon className="w-8 h-8" />
+                      <span className="font-black uppercase tracking-widest text-xs">Drop your bill photo</span>
+                    </div>
+                  </div>
+                )}
                 <div className="relative">
                   <textarea
                     className="w-full h-32 md:h-48 bg-transparent border-none focus:ring-0 text-lg md:text-xl resize-none placeholder:text-slate-700 font-mono text-slate-200"
-                    placeholder="Paste your bill text here...&#10;Or use the camera below to scan a bill!"
+                    placeholder="Paste your bill text, or drag & drop / upload a photo of it below..."
                     value={rawText}
                     onChange={(e) => setRawText(e.target.value)}
                   />
@@ -913,27 +943,27 @@ export default function App() {
                   const isExpanded = expandedGroups.has(group.id);
                   return (
                     <div key={group.id} className={`glass overflow-hidden rounded-[1.5rem] border border-white/5 transition-all ${isExpanded ? 'bg-white/[0.03]' : ''}`}>
-                      <div className="p-4 md:p-6 flex items-center justify-between gap-4">
-                        <div className="flex items-center gap-4 flex-1 cursor-pointer" onClick={() => toggleGroupExpansion(group.id)}>
+                      <div className="p-4 md:p-6 flex items-center justify-between gap-2 sm:gap-4">
+                        <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0 cursor-pointer" onClick={() => toggleGroupExpansion(group.id)}>
                           <div className="w-10 h-10 bg-emerald-500/10 rounded-xl flex items-center justify-center text-emerald-500 shrink-0">
                             <Users className="w-5 h-5" />
                           </div>
-                          <div className="flex flex-col">
-                            <span className="font-bold text-lg text-white leading-none mb-1">{group.name}</span>
+                          <div className="flex flex-col min-w-0">
+                            <span className="font-bold text-lg text-white leading-none mb-1 truncate">{group.name}</span>
                             <span className="text-[9px] text-slate-500 font-black uppercase tracking-widest">{group.people.length} Members</span>
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1 sm:gap-2 shrink-0">
                           <button 
                             onClick={(e) => { e.stopPropagation(); toggleGroupExpansion(group.id); }}
-                            className={`p-2 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+                            className={`p-2 transition-transform shrink-0 ${isExpanded ? 'rotate-180' : ''}`}
                           >
                             <ChevronDown className="w-4 h-4 text-slate-500" />
                           </button>
                           <button 
                             onClick={(e) => { e.stopPropagation(); loadGroup(group); }}
-                            className="px-4 py-2 bg-emerald-500 text-slate-950 font-black rounded-lg text-[9px] uppercase tracking-widest hover:scale-105 transition-transform"
+                            className="px-3 sm:px-4 py-2 bg-emerald-500 text-slate-950 font-black rounded-lg text-[9px] uppercase tracking-widest hover:scale-105 transition-transform whitespace-nowrap shrink-0"
                           >
                             Split Now
                           </button>
